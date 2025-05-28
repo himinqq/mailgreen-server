@@ -1,16 +1,32 @@
-[project]
-name = "mailgreen-api"
+[tool.poetry]
+name = "mailgreen"
 version = "0.1.0"
-description = ""
-authors = [
-    {name = "himinqq",email = "alsrud0966@naver.com"}
-]
+description = "A server application for managing and processing emails"
+authors = ["himinqq <alsrud0966@naver.com>"]
 readme = "README.md"
-requires-python = ">=3.12"
-dependencies = [
-]
 
+[tool.poetry.dependencies]
+python = ">=3.12"
+dotenv = ">=0.9.9,<0.10.0"
+sqlalchemy = ">=2.0.41,<3.0.0"
+alembic = ">=1.16.1,<2.0.0"
+pgvector = ">=0.4.1,<0.5.0"
+fastapi = ">=0.115.12,<0.116.0"
+authlib = ">=1.6.0,<2.0.0"
+google-auth-oauthlib = ">=1.2.2,<2.0.0"
+sentence-transformers = ">=4.1.0,<5.0.0"
+itsdangerous = ">=2.2.0,<3.0.0"
+starlette = ">=0.46.2,<0.47.0"
+celery = ">=5.5.2,<6.0.0"
+google-api-python-client = ">=2.170.0,<3.0.0"
+google-auth-httplib2 = ">=0.2.0,<0.3.0"
+psycopg2 = "^2.9.10"
+httpx = "^0.28.1"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.group.dev.dependencies]
+pre-commit = "^4.2.0"
+uvicorn = "^0.34.2"
