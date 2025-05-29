@@ -1,8 +1,9 @@
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import Depends, APIRouter, Query
+from dateutil.relativedelta import relativedelta
+from fastapi import Depends, APIRouter, Query, HTTPException
 from sqlalchemy.orm import Session
 
 from mailgreen.app.database import get_db
@@ -83,35 +84,69 @@ async def get_top_senders(
 async def get_sender_details(
     user_id: str = Query(..., description="User UUID"),
     sender: str = Query(..., description="발신자 이메일 or 이름"),
-    start_date: str = Query(None, description="조회 시작일 (YYYY-MM-DD)"),
-    end_date: str = Query(None, description="조회 종료일 (YYYY-MM-DD)"),
-    is_read: bool = Query(None, description="읽음 여부 필터 (true/false)"),
+    start_date: str | None = Query(None, description="조회 시작일 (YYYY-MM-DD)"),
+    end_date: str | None = Query(None, description="조회 종료일 (YYYY-MM-DD)"),
+    is_read: bool | None = Query(None, description="읽음 여부 필터 (true/false)"),
+    older_than_months: int | None = Query(
+        None, description="지정 개월 이전 메일만 조회 (예: 1 → 1개월 이전 메일)"
+    ),
+    min_size_mb: float | None = Query(
+        None, description="필터 기준 메일 크기 (MB 단위, 예: 0.1, 0.5, 1)"
+    ),
     db: Session = Depends(get_db),
 ):
-    query = db.query(MailEmbedding)
-    query = query.filter(
-        MailEmbedding.user_id == user_id, MailEmbedding.sender.ilike(f"%{sender}%")
+    # 기본 sender/UUID 필터
+    query = db.query(MailEmbedding).filter(
+        MailEmbedding.user_id == user_id,
+        MailEmbedding.sender.ilike(f"%{sender}%"),
     )
+
+    # 날짜 범위 필터
     if start_date:
-        dt = datetime.fromisoformat(start_date)
-        query = query.filter(MailEmbedding.received_at >= dt)
+        try:
+            dt_start = datetime.fromisoformat(start_date)
+        except ValueError:
+            raise HTTPException(400, "start_date 형식 오류 (YYYY-MM-DD)")
+        query = query.filter(MailEmbedding.received_at >= dt_start)
+
     if end_date:
-        dt = datetime.fromisoformat(end_date)
-        query = query.filter(MailEmbedding.received_at <= dt)
+        try:
+            dt_end = datetime.fromisoformat(end_date)
+        except ValueError:
+            raise HTTPException(400, "end_date 형식 오류 (YYYY-MM-DD)")
+        query = query.filter(MailEmbedding.received_at <= dt_end)
+
+    # Is Read: 읽음 여부 필터
     if is_read is not None:
         query = query.filter(MailEmbedding.is_read == is_read)
 
+    # Old Mail: 지정 개월 이전 메일만
+    if older_than_months is not None:
+        cutoff = datetime.now(timezone.utc) - relativedelta(months=older_than_months)
+        query = query.filter(MailEmbedding.received_at <= cutoff)
+
+    # Large Mail: 지정 MB 이상 크기만 필터링
+    if min_size_mb is not None:
+        # 사용자 입력은 MB 단위 (소수 가능), 저장은 바이트 단위
+        try:
+            bytes_threshold = int(
+                float(min_size_mb) * 1024 * 1024
+            )  # ex. 0.1MB → 104857 bytes
+        except ValueError:
+            raise HTTPException(status_code=400, detail="min_size_mb must be a number")
+
+        query = query.filter(MailEmbedding.size_bytes >= bytes_threshold)
+
+    # 정렬 및 결과 반환
     mails = query.order_by(MailEmbedding.received_at.desc()).all()
-    # 필요한 필드만 반환
-    result = []
-    for m in mails:
-        result.append(
-            {
-                "id": str(m.gmail_msg_id),
-                "subject": m.subject,
-                "snippet": m.snippet,
-                "received_at": m.received_at.isoformat(),
-                "is_read": m.is_read,
-            }
-        )
-    return result
+
+    return [
+        {
+            "id": m.gmail_msg_id,
+            "subject": m.subject,
+            "snippet": m.snippet,
+            "received_at": m.received_at.isoformat(),
+            "is_read": m.is_read,
+        }
+        for m in mails
+    ]
