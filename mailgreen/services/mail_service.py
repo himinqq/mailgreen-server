@@ -56,17 +56,7 @@ def fetch_messages(user_id: str, max_results: int = 10) -> List[Dict]:
     for m in msgs:
         msg_id = m["id"]
 
-        # snippet만 가져오기 (minimal)
-        snippet_resp = (
-            service.users()
-            .messages()
-            .get(userId="me", id=msg_id, format="minimal")
-            .execute()
-        )
-        snippet = snippet_resp.get("snippet", "")
-
-        # header만 가져오기 (metadata)
-        meta_resp = (
+        meta = (
             service.users()
             .messages()
             .get(
@@ -78,18 +68,18 @@ def fetch_messages(user_id: str, max_results: int = 10) -> List[Dict]:
             .execute()
         )
 
+        snippet = meta.get("snippet", "")
         hdrs = {
-            h["name"]: h["value"]
-            for h in meta_resp.get("payload", {}).get("headers", [])
+            h["name"]: h["value"] for h in meta.get("payload", {}).get("headers", [])
         }
         subject = hdrs.get("Subject", "(No Subject)")
         sender = hdrs.get("From", "(No Sender)")
+        size = meta.get("sizeEstimate", 0)
 
-        internal_ms = int(meta_resp.get("internalDate", 0))
-        ts = datetime.fromtimestamp(internal_ms / 1000, timezone.utc).isoformat()
+        internal_ms = int(meta.get("internalDate", 0))
+        timestamp = datetime.fromtimestamp(internal_ms / 1000, timezone.utc).isoformat()
 
-        size = meta_resp.get("sizeEstimate", 0)
-        labels = meta_resp.get("labelIds", [])
+        labels = meta.get("labelIds", [])
         is_read = "UNREAD" not in labels
 
         output.append(
@@ -98,7 +88,7 @@ def fetch_messages(user_id: str, max_results: int = 10) -> List[Dict]:
                 "snippet": snippet,
                 "subject": subject,
                 "from": sender,
-                "timestamp": ts,
+                "timestamp": timestamp,
                 "size": size,
                 "isRead": is_read,
             }
