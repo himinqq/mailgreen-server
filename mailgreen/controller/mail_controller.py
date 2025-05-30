@@ -15,8 +15,15 @@ router = APIRouter(prefix="/mail", tags=["mail"])
 
 @router.post("/analyze")
 def analyze_mail(user_id: UUID, db: Session = Depends(get_db)):
-    task_id = str(uuid.uuid4())
+    last = (
+        db.query(AnalysisTask)
+        .filter(AnalysisTask.user_id == user_id, AnalysisTask.history_id != None)
+        .order_by(AnalysisTask.started_at.desc())
+        .first()
+    )
+    start_history = last.history_id if last else None
 
+    task_id = str(uuid.uuid4())
     task = AnalysisTask(
         id=task_id,
         user_id=user_id,
@@ -24,11 +31,17 @@ def analyze_mail(user_id: UUID, db: Session = Depends(get_db)):
         status="pending",
         progress_pct=0,
         started_at=datetime.utcnow(),
+        history_id=start_history,
     )
     db.add(task)
     db.commit()
-    run_analysis.delay(user_id=user_id, task_id=task_id, limit=50)
-    return {"message": "분석을 시작했습니다."}
+
+    run_analysis.delay(
+        user_id=str(user_id),
+        task_id=task_id,
+        start_history_id=start_history,
+    )
+    return {"message": "분석을 시작했습니다.", "start_history_id": start_history}
 
 
 @router.get("/progress")
@@ -53,7 +66,7 @@ async def get_mail_progress(
 @router.get("/sender/top")
 async def get_top_senders(
     user_id: str = Query(..., description="User UUID"),
-    limit: int = Query(3, description="최대 발신자 수"),
+    limit: int = Query(..., description="최대 발신자 수"),
     db: Session = Depends(get_db),
 ):
     from sqlalchemy import func

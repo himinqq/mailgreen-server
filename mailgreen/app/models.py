@@ -1,5 +1,15 @@
 import datetime, enum
-from sqlalchemy import Column, String, Text, Boolean, Integer, DateTime, Float, UUID
+from sqlalchemy import (
+    Column,
+    String,
+    Text,
+    Boolean,
+    Integer,
+    DateTime,
+    Float,
+    UUID,
+    JSON,
+)
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.dialects.postgresql import UUID as PGUUID, ARRAY, TIMESTAMP
 from pgvector.sqlalchemy import Vector
@@ -58,6 +68,7 @@ class AnalysisTask(Base):
     started_at = Column(DateTime(timezone=True))
     finished_at = Column(DateTime(timezone=True), nullable=True)
     error_msg = Column(Text, nullable=True)
+    history_id = Column(Text, nullable=True)
 
 
 class UserCredentials(Base):
@@ -66,3 +77,4 @@ class UserCredentials(Base):
     access_token = Column(String, nullable=False)
     refresh_token = Column(String, nullable=False)
     expiry = Column(DateTime, nullable=False)
+    scopes = Column(JSON, nullable=False, server_default="[]")
