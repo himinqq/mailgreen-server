@@ -6,6 +6,7 @@ from mailgreen.app.database import get_db
 from authlib.integrations.starlette_client import OAuth
 from mailgreen.app.models import User, UserCredentials
 import logging, os
+from fastapi.responses import RedirectResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -69,7 +70,8 @@ async def auth_google_callback(request: Request, db: Session = Depends(get_db)):
             db.add(creds)
         db.commit()
 
-        return {"id": str(user.id), "name": user.name, "email": user.email}
+        redirect_url = f"{os.getenv("CLIENT_REDIRECT_URI")}/login/success?id={user.id}&name={user.name}&email={user.email}"
+        return RedirectResponse(url=redirect_url)
     except Exception as e:
         logger.exception("Google 인증 오류")
         raise HTTPException(status_code=500, detail="Google 인증 실패")
