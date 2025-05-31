@@ -72,6 +72,8 @@ def run_analysis(
                 snippet=mail["snippet"],
                 size_bytes=mail["size"],
                 is_read=mail["isRead"],
+                is_starred=mail["isStarred"],
+                labels=mail["labels"],
                 received_at=datetime.fromisoformat(mail["timestamp"]),
                 vector=get_embedding(mail["subject"] + " " + mail["snippet"]),
                 processed_at=datetime.now(timezone.utc),
