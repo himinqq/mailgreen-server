@@ -48,7 +48,6 @@ def analyze_mail(user_id: UUID, db: Session = Depends(get_db)):
 async def get_mail_progress(
     user_id: str = Query(..., description="User UUID"), db: Session = Depends(get_db)
 ):
-    # 해당 사용자 가장 최근 태스크 조회
     task = (
         db.query(AnalysisTask)
         .filter(AnalysisTask.user_id == user_id)
@@ -56,11 +55,23 @@ async def get_mail_progress(
         .first()
     )
     if not task:
-        # 태스크가 없으면 진행 중 아님
         return {"in_progress": False, "progress_pct": 0}
 
-    in_progress = task.status != "done"
-    return {"in_progress": in_progress, "progress_pct": task.progress_pct or 0}
+    if task.status in ("done", "failed"):
+        in_progress = False
+    else:
+        in_progress = True
+
+    response = {
+        "in_progress": in_progress,
+        "progress_pct": task.progress_pct or 0,
+        "status": task.status,
+    }
+
+    if task.status == "failed":
+        response["error_msg"] = task.error_msg
+
+    return response
 
 
 @router.get("/sender/top")
