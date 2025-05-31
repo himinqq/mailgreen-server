@@ -56,22 +56,23 @@ async def auth_google_callback(request: Request, db: Session = Depends(get_db)):
         creds = (
             db.query(UserCredentials).filter(UserCredentials.user_id == user.id).first()
         )
+        expiry_time = datetime.utcnow() + timedelta(seconds=token["expires_in"])
         if creds:
             creds.access_token = token["access_token"]
             creds.refresh_token = token.get("refresh_token", creds.refresh_token)
-            creds.expiry = datetime.utcnow() + timedelta(seconds=token["expires_in"])
+            creds.expiry = expiry_time
         else:
             creds = UserCredentials(
                 user_id=user.id,
                 access_token=token["access_token"],
                 refresh_token=token.get("refresh_token"),
-                expiry=datetime.utcnow() + timedelta(seconds=token["expires_in"]),
+                expiry=expiry_time,
             )
             db.add(creds)
         db.commit()
 
-        redirect_url = f"{os.getenv("CLIENT_REDIRECT_URI")}/login/success?id={user.id}&name={user.name}&email={user.email}"
+        redirect_url = f"{os.getenv('CLIENT_REDIRECT_URI')}/login/success?id={user.id}&name={user.name}&email={user.email}"
         return RedirectResponse(url=redirect_url)
-    except Exception as e:
+    except Exception:
         logger.exception("Google 인증 오류")
         raise HTTPException(status_code=500, detail="Google 인증 실패")
