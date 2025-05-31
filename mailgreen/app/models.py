@@ -1,15 +1,5 @@
 import datetime, enum
-from sqlalchemy import (
-    Column,
-    String,
-    Text,
-    Boolean,
-    Integer,
-    DateTime,
-    Float,
-    UUID,
-    JSON,
-)
+from sqlalchemy import Column, String, Text, Boolean, Integer, DateTime, UUID, Index
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.dialects.postgresql import UUID as PGUUID, ARRAY, TIMESTAMP
 from pgvector.sqlalchemy import Vector
@@ -52,9 +42,14 @@ class MailEmbedding(Base):
     received_at = Column(DateTime(timezone=True))
     vector = Column(Vector(384))
     keywords = Column(ARRAY(Text))
-    carbon_factor = Column(Float, default=0.00002)
-    carbon_saved_grams = Column(Float, default=0)
     processed_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
+
+    # Soft-Delete
+    is_deleted = Column(Boolean, nullable=False, server_default="false")
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+
+    # is_deleted 컬럼 인덱스 > 삭제되지 않은 레코드 빠르게 조회
+    __table_args__ = (Index("ix_mail_embeddings_is_deleted", "is_deleted"),)
 
 
 class AnalysisTask(Base):
@@ -77,4 +72,3 @@ class UserCredentials(Base):
     access_token = Column(String, nullable=False)
     refresh_token = Column(String, nullable=False)
     expiry = Column(DateTime, nullable=False)
-    scopes = Column(JSON, nullable=False, server_default="[]")
