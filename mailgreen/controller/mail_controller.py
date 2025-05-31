@@ -48,7 +48,6 @@ def analyze_mail(user_id: UUID, db: Session = Depends(get_db)):
 async def get_mail_progress(
     user_id: str = Query(..., description="User UUID"), db: Session = Depends(get_db)
 ):
-    # 해당 사용자 가장 최근 태스크 조회
     task = (
         db.query(AnalysisTask)
         .filter(AnalysisTask.user_id == user_id)
@@ -56,11 +55,23 @@ async def get_mail_progress(
         .first()
     )
     if not task:
-        # 태스크가 없으면 진행 중 아님
         return {"in_progress": False, "progress_pct": 0}
 
-    in_progress = task.status != "done"
-    return {"in_progress": in_progress, "progress_pct": task.progress_pct or 0}
+    if task.status in ("done", "failed"):
+        in_progress = False
+    else:
+        in_progress = True
+
+    response = {
+        "in_progress": in_progress,
+        "progress_pct": task.progress_pct or 0,
+        "status": task.status,
+    }
+
+    if task.status == "failed":
+        response["error_msg"] = task.error_msg
+
+    return response
 
 
 @router.get("/sender/top")
@@ -96,7 +107,7 @@ async def get_top_senders(
 @router.get("/sender")
 async def get_sender_details(
     user_id: str = Query(..., description="User UUID"),
-    sender: str = Query(..., description="발신자 이메일 or 이름"),
+    sender: str | None = Query(None, description="발신자 이메일 or 이름"),
     start_date: str | None = Query(None, description="조회 시작일 (YYYY-MM-DD)"),
     end_date: str | None = Query(None, description="조회 종료일 (YYYY-MM-DD)"),
     is_read: bool | None = Query(None, description="읽음 여부 필터 (true/false)"),
@@ -111,8 +122,11 @@ async def get_sender_details(
     # 기본 sender/UUID 필터
     query = db.query(MailEmbedding).filter(
         MailEmbedding.user_id == user_id,
-        MailEmbedding.sender.ilike(f"%{sender}%"),
     )
+
+    # sender가 있는 경우에만 필터 추가
+    if sender:
+        query = query.filter(MailEmbedding.sender.ilike(f"%{sender}%"))
 
     # 날짜 범위 필터
     if start_date:

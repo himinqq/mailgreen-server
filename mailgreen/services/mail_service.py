@@ -28,7 +28,6 @@ def get_credentials(user_id: str) -> Credentials:
             token_uri="https://oauth2.googleapis.com/token",
             client_id=os.getenv("GOOGLE_CLIENT_ID"),
             client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
-            scopes=cred.scopes,  # 기존 스코프도 로드
             expiry=cred.expiry,
         )
         # 만료되었으면 리프레시
@@ -37,7 +36,6 @@ def get_credentials(user_id: str) -> Credentials:
             # DB에 갱신된 토큰/만료시간 저장
             cred.access_token = creds.token
             cred.expiry = creds.expiry.replace(tzinfo=timezone.utc)
-            cred.scopes = creds.scopes  # ← 새 스코프 반영
             db.commit()
         return creds
     finally:
@@ -75,6 +73,7 @@ def batch_fetch_metadata(
         if err:
             logger.warning(f"Batch fetch error for {request_id}: {err}")
             return
+        label_ids = resp.get("labelIds", [])
         mails.append(
             {
                 "id": resp["id"],
@@ -93,7 +92,9 @@ def batch_fetch_metadata(
                     int(resp["internalDate"]) / 1000, timezone.utc
                 ).isoformat(),
                 "size": resp.get("sizeEstimate", 0),
-                "isRead": "UNREAD" not in resp.get("labelIds", []),
+                "labels": label_ids,
+                "isRead": "UNREAD" not in label_ids,
+                "isStarred": "STARRED" in label_ids,
             }
         )
 
