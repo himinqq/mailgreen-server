@@ -75,6 +75,7 @@ def batch_fetch_metadata(
         if err:
             logger.warning(f"Batch fetch error for {request_id}: {err}")
             return
+        label_ids = resp.get("labelIds", [])
         mails.append(
             {
                 "id": resp["id"],
@@ -93,7 +94,9 @@ def batch_fetch_metadata(
                     int(resp["internalDate"]) / 1000, timezone.utc
                 ).isoformat(),
                 "size": resp.get("sizeEstimate", 0),
-                "isRead": "UNREAD" not in resp.get("labelIds", []),
+                "labels": label_ids,
+                "isRead": "UNREAD" not in label_ids,
+                "isStarred": "STARRED" in label_ids,
             }
         )
 
