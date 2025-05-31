@@ -96,7 +96,7 @@ async def get_top_senders(
 @router.get("/sender")
 async def get_sender_details(
     user_id: str = Query(..., description="User UUID"),
-    sender: str = Query(..., description="발신자 이메일 or 이름"),
+    sender: str | None = Query(None, description="발신자 이메일 or 이름"),
     start_date: str | None = Query(None, description="조회 시작일 (YYYY-MM-DD)"),
     end_date: str | None = Query(None, description="조회 종료일 (YYYY-MM-DD)"),
     is_read: bool | None = Query(None, description="읽음 여부 필터 (true/false)"),
@@ -111,8 +111,11 @@ async def get_sender_details(
     # 기본 sender/UUID 필터
     query = db.query(MailEmbedding).filter(
         MailEmbedding.user_id == user_id,
-        MailEmbedding.sender.ilike(f"%{sender}%"),
     )
+
+    # sender가 있는 경우에만 필터 추가
+    if sender:
+        query = query.filter(MailEmbedding.sender.ilike(f"%{sender}%"))
 
     # 날짜 범위 필터
     if start_date:
