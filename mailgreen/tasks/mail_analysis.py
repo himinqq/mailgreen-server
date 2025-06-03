@@ -1,13 +1,10 @@
-from dotenv import load_dotenv, find_dotenv
-
-load_dotenv(find_dotenv())
+from mailgreen.services.auth_service import get_credentials
 
 from celery import Celery
 from sqlalchemy.orm import Session
 from mailgreen.app.database import SessionLocal
 from mailgreen.app.models import MailEmbedding, AnalysisTask
 from mailgreen.services.mail_service import (
-    get_credentials,
     batch_fetch_metadata,
     initial_load,
 )

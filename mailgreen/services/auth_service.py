@@ -1,7 +1,16 @@
+import os
 from mailgreen.app.config import Config as AppConfig
 from fastapi import HTTPException
 from google_auth_oauthlib.flow import Flow
 import requests
+from datetime import timezone
+
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from sqlalchemy.orm import Session
+
+from mailgreen.app.database import SessionLocal
+from mailgreen.app.models import UserCredentials
 
 CLIENT_ID = AppConfig.GOOGLE_CLIENT_ID
 CLIENT_SECRET = AppConfig.GOOGLE_CLIENT_SECRET
@@ -44,3 +53,32 @@ def refresh_token(token):
     if response.status_code != 200:
         raise HTTPException(status_code=400, detail="토큰 갱신 실패")
     return response.json()
+
+
+def get_credentials(user_id: str) -> Credentials:
+    db: Session = SessionLocal()
+    try:
+        cred = (
+            db.query(UserCredentials).filter(UserCredentials.user_id == user_id).first()
+        )
+        if not cred:
+            raise RuntimeError(f"No credentials for user {user_id}")
+
+        creds = Credentials(
+            token=cred.access_token,
+            refresh_token=cred.refresh_token,
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=os.getenv("GOOGLE_CLIENT_ID"),
+            client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+            expiry=cred.expiry,
+        )
+        # 만료되었으면 리프레시
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            # DB에 갱신된 토큰/만료시간 저장
+            cred.access_token = creds.token
+            cred.expiry = creds.expiry.replace(tzinfo=timezone.utc)
+            db.commit()
+        return creds
+    finally:
+        db.close()
