@@ -1,3 +1,4 @@
+from mailgreen.services.assign_topic_service import batch_assign_category
 from mailgreen.services.auth_service import get_credentials
 
 from celery import Celery
@@ -90,6 +91,8 @@ def run_analysis(
         task.progress_pct = 100
         task.finished_at = datetime.now(timezone.utc)
         db.commit()
+
+        batch_assign_category()
 
     except Exception as e:
         # 에러 처리
