@@ -1,7 +1,19 @@
 import datetime, enum
-from sqlalchemy import Column, String, Text, Boolean, Integer, DateTime, UUID, Index
-from sqlalchemy.orm import declarative_base
-from sqlalchemy.dialects.postgresql import UUID as PGUUID, ARRAY, TIMESTAMP
+from sqlalchemy import (
+    Column,
+    String,
+    Text,
+    Boolean,
+    Integer,
+    DateTime,
+    UUID,
+    Index,
+    Enum,
+    Float,
+    ForeignKey,
+)
+from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.dialects.postgresql import UUID as PGUUID, ARRAY, TIMESTAMP, JSONB
 from pgvector.sqlalchemy import Vector
 from uuid import uuid4
 
@@ -19,10 +31,39 @@ class User(Base):
     created_at = Column(TIMESTAMP, default=datetime.datetime.utcnow)
 
 
-class MailActionType(enum.Enum):
-    delete = "delete"
-    archive = "archive"
-    spam = "spam"
+class UserCredentials(Base):
+    __tablename__ = "user_credentials"
+    user_id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    access_token = Column(String, nullable=False)
+    refresh_token = Column(String, nullable=False)
+    expiry = Column(DateTime, nullable=False)
+
+
+class AnalysisTask(Base):
+    __tablename__ = "analysis_tasks"
+
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id = Column(PGUUID(as_uuid=True), nullable=False)
+    task_type = Column(String(50))
+    status = Column(String(20))
+    progress_pct = Column(Integer)
+    started_at = Column(DateTime(timezone=True))
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    error_msg = Column(Text, nullable=True)
+    history_id = Column(Text, nullable=True)
+
+
+class MajorTopic(Base):
+    __tablename__ = "major_topic"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(Text, nullable=False, unique=True)
+    description = Column(Text, nullable=True)
+
+    mails = relationship("MailEmbedding", back_populates="topic")
+    embedding = relationship(
+        "MajorTopicEmbedding", back_populates="topic", uselist=False
+    )
 
 
 class MailEmbedding(Base):
@@ -40,7 +81,7 @@ class MailEmbedding(Base):
     is_read = Column(Boolean)
     is_starred = Column(Boolean)
     received_at = Column(DateTime(timezone=True))
-    vector = Column(Vector(384))
+    vector = Column(Vector(768))
     keywords = Column(ARRAY(Text))
     processed_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
 
@@ -48,27 +89,34 @@ class MailEmbedding(Base):
     is_deleted = Column(Boolean, nullable=False, server_default="false")
     deleted_at = Column(DateTime(timezone=True), nullable=True)
 
+    category = Column(
+        Integer,
+        ForeignKey("major_topic.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    topic = relationship("MajorTopic", back_populates="mails")
+
     # is_deleted 컬럼 인덱스 > 삭제되지 않은 레코드 빠르게 조회
     __table_args__ = (Index("ix_mail_embeddings_is_deleted", "is_deleted"),)
 
 
-class AnalysisTask(Base):
-    __tablename__ = "analysis_tasks"
+class MajorTopicEmbedding(Base):
+    __tablename__ = "major_topic_embedding"
 
-    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
-    user_id = Column(PGUUID(as_uuid=True), nullable=False)
-    task_type = Column(String(50))
-    status = Column(String(20))
-    progress_pct = Column(Integer)
-    started_at = Column(DateTime(timezone=True))
-    finished_at = Column(DateTime(timezone=True), nullable=True)
-    error_msg = Column(Text, nullable=True)
-    history_id = Column(Text, nullable=True)
+    topic_id = Column(
+        Integer,
+        ForeignKey("major_topic.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    vector = Column(ARRAY(Float), nullable=False)
+    updated_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, server_default="NOW()"
+    )
+
+    topic = relationship("MajorTopic", back_populates="embedding")
 
 
-class UserCredentials(Base):
-    __tablename__ = "user_credentials"
-    user_id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
-    access_token = Column(String, nullable=False)
-    refresh_token = Column(String, nullable=False)
-    expiry = Column(DateTime, nullable=False)
+MajorTopic.embedding = relationship(
+    "MajorTopicEmbedding", back_populates="topic", uselist=False
+)
