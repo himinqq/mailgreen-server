@@ -2,7 +2,10 @@ import os
 import logging
 from datetime import datetime, timezone
 from typing import List, Optional
+import time
+import random
 
+from googleapiclient.errors import HttpError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from sqlalchemy.orm import Session
@@ -64,8 +67,48 @@ def list_all_message_ids(service) -> List[str]:
     return ids
 
 
+def _parse_message(resp: dict) -> dict:
+    headers = resp.get("payload", {}).get("headers", [])
+    header_map = {h["name"]: h["value"] for h in headers}
+
+    label_ids = resp.get("labelIds", [])
+    return {
+        "id": resp["id"],
+        "snippet": resp.get("snippet", ""),
+        "subject": header_map.get("Subject", ""),
+        "from": header_map.get("From", ""),
+        "timestamp": datetime.fromtimestamp(
+            int(resp["internalDate"]) / 1000, timezone.utc
+        ).isoformat(),
+        "size": resp.get("sizeEstimate", 0),
+        "labels": label_ids,
+        "isRead": "UNREAD" not in label_ids,
+        "isStarred": "STARRED" in label_ids,
+    }
+
+
+def _execute_with_backoff(fn, max_retries: int = 5):
+
+    # 429 혹은 rateLimitExceeded가 대기 후 재시도
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except HttpError as e:
+            status = getattr(e.resp, "status", None)
+            if status == 429 or "rateLimitExceeded" in str(e):
+                sleep_sec = (2**attempt) + random.uniform(0, 1)
+                logger.warning(
+                    f"rateLimitExceeded (status={status}), retry {attempt + 1}/{max_retries} "
+                    f"after {sleep_sec:.2f}s"
+                )
+                time.sleep(sleep_sec)
+            else:
+                raise
+    raise RuntimeError(f"Max retries ({max_retries}) reached")
+
+
 def batch_fetch_metadata(
-    service, msg_ids: list[str], batch_size: int = 100
+    service, msg_ids: list[str], batch_size: int = 50, max_retries: int = 5
 ) -> list[dict]:
     mails: list[dict] = []
 
@@ -73,33 +116,14 @@ def batch_fetch_metadata(
         if err:
             logger.warning(f"Batch fetch error for {request_id}: {err}")
             return
-        label_ids = resp.get("labelIds", [])
-        mails.append(
-            {
-                "id": resp["id"],
-                "snippet": resp.get("snippet", ""),
-                "subject": next(
-                    h["value"]
-                    for h in resp["payload"]["headers"]
-                    if h["name"] == "Subject"
-                ),
-                "from": next(
-                    h["value"]
-                    for h in resp["payload"]["headers"]
-                    if h["name"] == "From"
-                ),
-                "timestamp": datetime.fromtimestamp(
-                    int(resp["internalDate"]) / 1000, timezone.utc
-                ).isoformat(),
-                "size": resp.get("sizeEstimate", 0),
-                "labels": label_ids,
-                "isRead": "UNREAD" not in label_ids,
-                "isStarred": "STARRED" in label_ids,
-            }
-        )
+        mails.append(_parse_message(resp))
+
+    def _run_batch(batch_req):
+        _execute_with_backoff(batch_req.execute, max_retries)
 
     batch = service.new_batch_http_request(callback=_collect)
-    for i, mid in enumerate(msg_ids, start=1):
+
+    for idx, mid in enumerate(msg_ids, start=1):
         req = (
             service.users()
             .messages()
@@ -111,14 +135,42 @@ def batch_fetch_metadata(
             )
         )
         batch.add(req, request_id=mid)
-        if i % batch_size == 0:
-            batch.execute()
+
+        if idx % batch_size == 0:
+            _run_batch(batch)
             batch = service.new_batch_http_request(callback=_collect)
 
-    batch.execute()
+    remainder = len(msg_ids) % batch_size
+    if remainder:
+        _run_batch(batch)
 
-    if len(mails) < len(msg_ids):
-        logger.warning(f"Fetched {len(mails)} metadata but expected {len(msg_ids)}")
+    fetched_ids = {m["id"] for m in mails}
+    missing = [mid for mid in msg_ids if mid not in fetched_ids]
+    if missing:
+        logger.warning(
+            f"Fetched {len(fetched_ids)} items, expected {len(msg_ids)}. "
+            f"Retrying {len(missing)} missing IDs individually."
+        )
+        for mid in missing:
+
+            def _get_single():
+                return (
+                    service.users()
+                    .messages()
+                    .get(
+                        userId="me",
+                        id=mid,
+                        format="metadata",
+                        metadataHeaders=["Subject", "From", "Date"],
+                    )
+                    .execute()
+                )
+
+            try:
+                resp = _execute_with_backoff(_get_single, max_retries)
+                mails.append(_parse_message(resp))
+            except HttpError as e:
+                logger.error(f"ID={mid} fetch failed even after retries: {e}")
 
     return mails
 
