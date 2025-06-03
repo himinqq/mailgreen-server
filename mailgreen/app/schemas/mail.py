@@ -10,7 +10,7 @@ class MailOut(BaseModel):
     is_read: bool | None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class DeleteMailsRequest(BaseModel):
