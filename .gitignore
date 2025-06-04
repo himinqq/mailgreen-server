@@ -2,3 +2,6 @@ __pycache__/
 *.py[cod]
 .venv/
 .env
+
+fastapi.log
+glances.log
