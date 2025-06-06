@@ -7,7 +7,7 @@ from googleapiclient.discovery import build
 from mailgreen.app.database import get_db
 from mailgreen.app.schemas.mail import DeleteMailsRequest
 from mailgreen.services.auth_service import get_credentials
-from mailgreen.services.mail_service import trash_mails
+from mailgreen.services.trash_service import trash_mails
 
 router = APIRouter(prefix="/mail", tags=["trash"])
 
