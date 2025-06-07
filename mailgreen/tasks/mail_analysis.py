@@ -8,6 +8,7 @@ from mailgreen.app.models import MailEmbedding, AnalysisTask
 from mailgreen.services.mail_service import (
     batch_fetch_metadata,
     initial_load,
+    logger,
 )
 from googleapiclient.discovery import build
 from mailgreen.services.embed_service import get_embedding
@@ -22,25 +23,26 @@ def run_analysis(
     self, user_id: str, task_id: str, start_history_id: Optional[str] = None
 ):
     db: Session = SessionLocal()
+
+    orig_history = None
+    processed_count = 0
+    total = 1
+
     try:
-        # 1) Task 가져오기
         task: AnalysisTask = db.query(AnalysisTask).get(task_id)
         if not task:
             raise RuntimeError(f"Task {task_id} not found")
 
-        # 2) history_id 결정 (초기엔 None)
+        orig_history = task.history_id
+
         history_id = start_history_id or task.history_id
 
-        # 3) Gmail API 클라이언트 준비
         creds = get_credentials(user_id)
         service = build("gmail", "v1", credentials=creds)
 
-        # 4) 메일 목록 가져오기
         if history_id is None:
-            # 초기 로드: 모든 메일
             mails = initial_load(service)
         else:
-            # 변경분 로드: 새로 추가된 메일 ID만
             resp = (
                 service.users()
                 .history()
@@ -60,8 +62,8 @@ def run_analysis(
 
         total = len(mails) or 1
 
-        # 5) 각 메일 삽입 (중복 체크 없음)
         for idx, mail in enumerate(mails, start=1):
+            processed_count = idx
             emb = MailEmbedding(
                 user_id=user_id,
                 gmail_msg_id=mail["id"],
@@ -78,13 +80,11 @@ def run_analysis(
             )
             db.add(emb)
 
-            # 5% 단위로만 진행률 갱신
             pct = int(idx / total * 100)
             if pct % 5 == 0:
                 task.progress_pct = pct
                 db.commit()
 
-        # 6) 다음 history_id 저장, 상태 업데이트
         new_history = service.users().getProfile(userId="me").execute().get("historyId")
         task.history_id = new_history
         task.status = "done"
@@ -92,15 +92,26 @@ def run_analysis(
         task.finished_at = datetime.now(timezone.utc)
         db.commit()
 
-        batch_assign_category()
-
     except Exception as e:
-        # 에러 처리
         if task:
+            task.history_id = orig_history
+            if processed_count:
+                task.progress_pct = int(processed_count / total * 100)
+            else:
+                task.progress_pct = 0
+
             task.status = "failed"
             task.error_msg = str(e)
+            task.finished_at = datetime.now(timezone.utc)
             db.commit()
-        raise
 
+        logger.error(f"[run_analysis] 예외 발생: {e}", exc_info=True)
     finally:
+        try:
+            batch_assign_category()
+        except Exception as e2:
+            logger.error(
+                f"[run_analysis] batch_assign_category 중 예외 발생: {e2}",
+                exc_info=True,
+            )
         db.close()

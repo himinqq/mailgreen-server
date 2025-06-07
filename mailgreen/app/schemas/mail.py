@@ -16,3 +16,4 @@ class MailOut(BaseModel):
 class DeleteMailsRequest(BaseModel):
     message_ids: List[str]
     confirm: bool = False  # false면 삭제하지 않고 추정만
+    delete_protected_sender: bool = False
