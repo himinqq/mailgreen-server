@@ -1,8 +1,9 @@
 from typing import Dict, Any
 
-from fastapi import APIRouter, Depends, Query, Body
+from fastapi import APIRouter, Depends, Query, Body, HTTPException, status
 from sqlalchemy.orm import Session
 from googleapiclient.discovery import build
+from urllib.error import HTTPError
 
 from mailgreen.app.database import get_db
 from mailgreen.app.schemas.mail import DeleteMailsRequest
@@ -22,4 +23,22 @@ async def delete_mails(
 ):
     creds = get_credentials(user_id)
     service = build("gmail", "v1", credentials=creds)
-    return trash_mails(db, service, payload.message_ids, payload.confirm)
+    try:
+        result = trash_mails(
+            db=db,
+            service=service,
+            message_ids=payload.message_ids,
+            confirm=payload.confirm,
+            delete_protected_sender=payload.delete_protected_sender,
+        )
+    except HTTPError as he:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(he)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"알 수 없는 오류 발생: {e}",
+        )
+
+    return result
