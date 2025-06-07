@@ -14,7 +14,7 @@ def get_top_senders(db: Session, user_id: str, limit: int) -> List[dict]:
             MailEmbedding.sender.label("sender"),
             func.count(MailEmbedding.id).label("count"),
         )
-        .filter(MailEmbedding.user_id == user_id)
+        .filter(MailEmbedding.user_id == user_id, MailEmbedding.is_deleted == False)
         .group_by(MailEmbedding.sender)
         .order_by(func.count(MailEmbedding.id).desc())
         .limit(limit)
@@ -39,7 +39,9 @@ def get_sender_details(
     older_than_months: Optional[int] = None,
     min_size_mb: Optional[float] = None,
 ) -> List[MailEmbedding]:
-    query = db.query(MailEmbedding).filter(MailEmbedding.user_id == user_id)
+    query = db.query(MailEmbedding).filter(
+        MailEmbedding.user_id == user_id, MailEmbedding.is_deleted == False
+    )
 
     if sender:
         query = query.filter(MailEmbedding.sender.ilike(f"%{sender}%"))
@@ -72,7 +74,7 @@ def get_sender_details_count(
     query = db.query(
         MailEmbedding.sender.label("sender"),
         func.count(MailEmbedding.id).label("count"),
-    ).filter(MailEmbedding.user_id == user_id)
+    ).filter(MailEmbedding.user_id == user_id, MailEmbedding.is_deleted == False)
 
     if sender:
         query = query.filter(MailEmbedding.sender.ilike(f"%{sender}%"))
