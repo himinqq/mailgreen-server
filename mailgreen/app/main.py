@@ -1,20 +1,11 @@
 import os
 from dotenv import load_dotenv, find_dotenv
 from starlette.middleware.sessions import SessionMiddleware
-
-
-load_dotenv(find_dotenv())
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from mailgreen.controller.auth_controller import router as auth_router
-from mailgreen.controller.mail_controller import router as mail_router
-from mailgreen.controller.sender_controller import router as sender_router
-from mailgreen.controller.keyword_controller import router as keyword_router
-from mailgreen.controller.carbon_controller import router as carbon_router
 
+load_dotenv(find_dotenv())
 app = FastAPI()
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,9 +16,18 @@ app.add_middleware(
 
 app.add_middleware(SessionMiddleware, secret_key=os.getenv("SESSION_SECRET"))
 
-app.include_router(auth_router)
-app.include_router(mail_router)
-app.include_router(sender_router)
-app.include_router(keyword_router)
+from mailgreen.controller import *
 
-app.include_router(carbon_router)
+routers = [
+    auth_router,
+    mail_router,
+    sender_router,
+    keyword_router,
+    trash_router,
+    star_router,
+    carbon_router
+]
+
+for r in routers:
+    app.include_router(r)
+
