@@ -1,6 +1,8 @@
 import logging
 import time
 import random
+import re
+import requests
 
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional
@@ -8,9 +10,11 @@ from urllib.error import HTTPError
 
 from googleapiclient.errors import HttpError
 from sqlalchemy.orm import Session, Query
+from googleapiclient.discovery import build
 
 from mailgreen.app.models import MailEmbedding, AnalysisTask
 from dateutil.relativedelta import relativedelta
+from mailgreen.services.auth_service import get_credentials
 
 logger = logging.getLogger(__name__)
 
@@ -415,3 +419,158 @@ def batch_fetch_metadata(
 def initial_load(service) -> List[dict]:
     ids = list_all_message_ids(service)
     return batch_fetch_metadata(service, ids)
+
+
+def _filter_mail_embeddings(db, user_id, arguments):
+    query = db.query(MailEmbedding).filter(MailEmbedding.user_id == user_id, MailEmbedding.is_deleted == False)
+    if arguments.get("ids"):
+        # ids가 있으면 ids만 필터링 (다른 조건 무시)
+        query = query.filter(MailEmbedding.gmail_msg_id.in_(arguments["ids"]))
+        return query.all()
+    if arguments.get("from"):
+        query = query.filter(MailEmbedding.sender.ilike(f"%{arguments['from']}%"))
+    if arguments.get("subject"):
+        query = query.filter(MailEmbedding.subject.ilike(f"%{arguments['subject']}%"))
+    if arguments.get("start_date"):
+        query = query.filter(MailEmbedding.received_at >= arguments["start_date"])
+    if arguments.get("end_date"):
+        query = query.filter(MailEmbedding.received_at <= arguments["end_date"])
+    if arguments.get("is_read") is not None:
+        query = query.filter(MailEmbedding.is_read == arguments["is_read"])
+    # PDF 첨부 필터 (DB에 keywords/labels/첨부정보가 있다면 활용, 없으면 Gmail API로 확인 필요)
+    mails = query.all()
+    if arguments.get("has_pdf") is not None:
+        filtered = []
+        for m in mails:
+            # DB에 첨부정보 없으면 Gmail API로 확인 필요
+            # 여기선 labels에 'ATTACHMENT'가 있거나, 실제로는 Gmail API로 확인해야 정확
+            if arguments["has_pdf"]:
+                # 실제 구현: Gmail API로 해당 메일의 첨부파일 mimetype 확인 필요
+                filtered.append(m)  # 임시로 모두 통과
+            else:
+                filtered.append(m)  # 임시로 모두 통과
+        mails = filtered
+    return mails
+
+
+def mark_important(db, user_id, arguments):
+    creds = get_credentials(user_id)
+    service = build("gmail", "v1", credentials=creds)
+    user_id_gmail = "me"
+    mails = _filter_mail_embeddings(db, user_id, arguments)
+    updated = []
+    updated_info = []
+    for mail in mails:
+        try:
+            service.users().messages().modify(
+                userId=user_id_gmail,
+                id=mail.gmail_msg_id,
+                body={"addLabelIds": ["STARRED"]}
+            ).execute()
+            mail.is_starred = True
+            updated.append(mail.gmail_msg_id)
+            updated_info.append({
+                "id": mail.gmail_msg_id,
+                "subject": mail.subject,
+                "sender": mail.sender,
+                "received_at": mail.received_at.isoformat() if mail.received_at else None
+            })
+        except Exception as e:
+            continue
+    db.commit()
+    return {"starred": updated, "count": len(updated), "starred_mails": updated_info}
+
+
+def read_mail(db, user_id, arguments):
+    creds = get_credentials(user_id)
+    service = build("gmail", "v1", credentials=creds)
+    user_id_gmail = "me"
+    mails = _filter_mail_embeddings(db, user_id, arguments)
+    updated = []
+    for mail in mails:
+        try:
+            service.users().messages().modify(
+                userId=user_id_gmail,
+                id=mail.gmail_msg_id,
+                body={"removeLabelIds": ["UNREAD"]}
+            ).execute()
+            mail.is_read = True
+            updated.append(mail.gmail_msg_id)
+        except Exception as e:
+            continue
+    db.commit()
+    return {"read": updated, "count": len(updated)}
+
+
+def delete_mail(db, user_id, arguments):
+    creds = get_credentials(user_id)
+    service = build("gmail", "v1", credentials=creds)
+    user_id_gmail = "me"
+    mails = _filter_mail_embeddings(db, user_id, arguments)
+    deleted = []
+    for mail in mails:
+        try:
+            service.users().messages().trash(userId=user_id_gmail, id=mail.gmail_msg_id).execute()
+            mail.is_deleted = True
+            mail.deleted_at = datetime.utcnow()
+            deleted.append(mail.gmail_msg_id)
+        except Exception as e:
+            continue
+    db.commit()
+    return {"deleted": deleted, "count": len(deleted)}
+
+
+def search_mail(db, user_id, arguments):
+    mails = _filter_mail_embeddings(db, user_id, arguments)
+    # 결과 요약
+    return [{
+        "id": m.gmail_msg_id,
+        "subject": m.subject,
+        "snippet": m.snippet,
+        "received_at": m.received_at.isoformat() if m.received_at else None,
+        "is_read": m.is_read,
+        "is_starred": m.is_starred
+    } for m in mails]
+
+
+def unsubscribe_mail(db, user_id, arguments):
+    creds = get_credentials(user_id)
+    service = build("gmail", "v1", credentials=creds)
+    user_id_gmail = "me"
+    mails = _filter_mail_embeddings(db, user_id, arguments)
+    unsubscribed = []
+    failed = []
+    for mail in mails:
+        try:
+            msg = service.users().messages().get(userId=user_id_gmail, id=mail.gmail_msg_id, format="metadata", metadataHeaders=["List-Unsubscribe"]).execute()
+            headers = msg.get("payload", {}).get("headers", [])
+            unsub_header = None
+            for h in headers:
+                if h["name"].lower() == "list-unsubscribe":
+                    unsub_header = h["value"]
+                    break
+            if unsub_header:
+                # List-Unsubscribe 헤더에서 mailto 또는 http(s) 링크 추출
+                urls = re.findall(r'<(.*?)>', unsub_header)
+                for url in urls:
+                    if url.startswith("mailto:"):
+                        # mailto는 실제로는 자동화가 어려움(별도 구현 필요)
+                        continue
+                    elif url.startswith("http"):
+                        try:
+                            resp = requests.get(url, timeout=10)
+                            if resp.status_code < 400:
+                                unsubscribed.append({
+                                    "id": mail.gmail_msg_id,
+                                    "subject": mail.subject,
+                                    "sender": mail.sender,
+                                    "unsub_url": url
+                                })
+                                break
+                        except Exception as e:
+                            failed.append({"id": mail.gmail_msg_id, "error": str(e)})
+            else:
+                failed.append({"id": mail.gmail_msg_id, "error": "List-Unsubscribe 헤더 없음"})
+        except Exception as e:
+            failed.append({"id": mail.gmail_msg_id, "error": str(e)})
+    return {"unsubscribed": unsubscribed, "failed": failed, "count": len(unsubscribed)}
