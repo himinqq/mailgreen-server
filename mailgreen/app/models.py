@@ -120,3 +120,10 @@ class MajorTopicEmbedding(Base):
 MajorTopic.embedding = relationship(
     "MajorTopicEmbedding", back_populates="topic", uselist=False
 )
+
+
+class UserProtectedSender(Base):
+    __tablename__ = "user_protected_sender"
+
+    user_id = Column(PGUUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
+    sender_email = Column(String(320), primary_key=True)

@@ -58,178 +58,6 @@ def filter_mails(
     return query
 
 
-def get_top_senders(db: Session, user_id: str, limit: int) -> List[dict]:
-    from sqlalchemy import func
-    from email.utils import parseaddr
-
-    rows = (
-        db.query(
-            MailEmbedding.sender.label("sender"),
-            func.count(MailEmbedding.id).label("count"),
-        )
-        .filter(MailEmbedding.user_id == user_id)
-        .group_by(MailEmbedding.sender)
-        .order_by(func.count(MailEmbedding.id).desc())
-        .limit(limit)
-        .all()
-    )
-
-    result = []
-    for r in rows:
-        name, _ = parseaddr(r.sender or "")
-        sender_name = name if name else "(Unknown)"
-        result.append({"sender": r.sender, "name": sender_name, "count": r.count})
-    return result
-
-
-def get_sender_details(
-    db: Session,
-    user_id: str,
-    sender: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    is_read: Optional[bool] = None,
-    older_than_months: Optional[int] = None,
-    min_size_mb: Optional[float] = None,
-) -> List[MailEmbedding]:
-    query = db.query(MailEmbedding).filter(MailEmbedding.user_id == user_id)
-
-    if sender:
-        query = query.filter(MailEmbedding.sender.ilike(f"%{sender}%"))
-
-    query = filter_mails(
-        query,
-        start_date=start_date,
-        end_date=end_date,
-        is_read=is_read,
-        older_than_months=older_than_months,
-        min_size_mb=min_size_mb,
-    )
-
-    return query.order_by(MailEmbedding.received_at.desc()).all()
-
-
-def get_sender_details_count(
-    db: Session,
-    user_id: str,
-    sender: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    is_read: Optional[bool] = None,
-    older_than_months: Optional[int] = None,
-    min_size_mb: Optional[float] = None,
-) -> List[dict]:
-    
-    from sqlalchemy import func
-    from email.utils import parseaddr
-
-    query = db.query(
-        MailEmbedding.sender.label("sender"),
-        func.count(MailEmbedding.id).label("count"),
-    ).filter(MailEmbedding.user_id == user_id)
-
-    if sender:
-        query = query.filter(MailEmbedding.sender.ilike(f"%{sender}%"))
-
-    query = filter_mails(
-        query,
-        start_date=start_date,
-        end_date=end_date,
-        is_read=is_read,
-        older_than_months=older_than_months,
-        min_size_mb=min_size_mb,
-    )
-
-    rows = (
-        query.group_by(MailEmbedding.sender)
-        .order_by(func.count(MailEmbedding.id).desc())
-        .all()
-    )
-
-    result = []
-    for r in rows:
-        name, _ = parseaddr(r.sender or "")
-        sender_name = name if name else "(Unknown)"
-        result.append({"sender": r.sender, "name": sender_name, "count": r.count})
-    
-    return result
-
-
-CO2_PER_EMAIL_G = 4.0  # 메일 하나당 절감 탄소량(g)
-
-
-def trash_mails(
-    db: Session,
-    service,
-    message_ids: List[str],
-    confirm: bool = False,
-) -> dict:
-    count = len(message_ids)
-    estimated_saved = round(count * CO2_PER_EMAIL_G, 2)
-    deleted_ids = []
-    errors = []
-
-    if not confirm:
-        for gmail_msg_id in message_ids:
-            deleted_ids.append(f"{gmail_msg_id} (dry-run)")
-        return {
-            "requested_count": count,
-            "deleted": False,
-            "estimated_carbon_saved_g": estimated_saved,
-            "deleted_ids": deleted_ids,
-            "errors": [],
-        }
-
-    for gmail_msg_id in message_ids:
-        try:
-            service.users().messages().trash(userId="me", id=gmail_msg_id).execute()
-            deleted_ids.append(gmail_msg_id)
-        except HttpError as e:
-            error_detail = None
-            try:
-                error_detail = e.error_details or e.content.decode()
-            except:
-                pass
-            errors.append(
-                {
-                    "msg_id": gmail_msg_id,
-                    "error": f"Gmail API 에러: {str(e)}",
-                    "details": error_detail,
-                }
-            )
-            continue
-
-        record = (
-            db.query(MailEmbedding)
-            .filter(MailEmbedding.gmail_msg_id == gmail_msg_id)
-            .first()
-        )
-        if record:
-            record.is_deleted = True
-            record.deleted_at = datetime.utcnow()
-        else:
-            errors.append(
-                {
-                    "msg_id": gmail_msg_id,
-                    "error": "DB에서 해당 Gmail 메시지 ID를 찾을 수 없습니다.",
-                }
-            )
-
-    try:
-        db.commit()
-    except Exception as db_err:
-        db.rollback()
-        raise HTTPError(status_code=500, detail=f"DB 업데이트 실패: {str(db_err)}")
-
-    return {
-        "requested_count": count,
-        "deleted": True,
-        "estimated_carbon_saved_g": estimated_saved,
-        "deleted_ids": deleted_ids,
-        "errors": errors,
-    }
-
-
 def start_analysis_task(db: Session, user_id: str) -> str:
     import uuid
     from datetime import datetime, timezone
@@ -350,7 +178,7 @@ def _execute_with_backoff(fn, max_retries: int = 5):
 
 
 def batch_fetch_metadata(
-    service, msg_ids: List[str], batch_size: int = 50, max_retries: int = 5
+    service, msg_ids: List[str], batch_size: int = 20, max_retries: int = 5
 ) -> List[dict]:
     mails: List[dict] = []
 
@@ -361,7 +189,7 @@ def batch_fetch_metadata(
         mails.append(_parse_message(resp))
 
     def _run_batch(batch_req):
-        _execute_with_backoff(batch_req.execute, max_retries)
+        return _execute_with_backoff(batch_req.execute, max_retries)
 
     batch = service.new_batch_http_request(callback=_collect)
 
@@ -377,13 +205,25 @@ def batch_fetch_metadata(
             )
         )
         batch.add(req, request_id=mid)
+
         if idx % batch_size == 0:
-            _run_batch(batch)
-            batch = service.new_batch_http_request(callback=_collect)
+            try:  # 배치 실패 시에도 로그만 남기고 계속 진행
+                _run_batch(batch)
+            except HttpError as e:
+                logger.error(f"[batch_fetch_metadata] 배치 실행 실패: {e}")
+            finally:
+                batch = service.new_batch_http_request(callback=_collect)
+            time.sleep(0.2)
 
     remainder = len(msg_ids) % batch_size
     if remainder:
-        _run_batch(batch)
+        try:
+            _run_batch(batch)
+        except HttpError as e:
+            logger.error(f"[batch_fetch_metadata] 나머지 배치 실행 실패: {e}")
+        finally:
+            batch = None  # 더 이상 batch를 쓰지 않으므로 None으로 해제
+        time.sleep(0.2)
 
     fetched_ids = {m["id"] for m in mails}
     missing = [mid for mid in msg_ids if mid not in fetched_ids]
@@ -411,7 +251,26 @@ def batch_fetch_metadata(
                 resp = _execute_with_backoff(_get_single, max_retries)
                 mails.append(_parse_message(resp))
             except HttpError as e:
-                logger.error(f"ID={mid} fetch failed even after retries: {e}")
+                status = getattr(e.resp, "status", None)
+                if status == 404:
+                    # 404 Not Found → 이미 없는 메시지로 판단하고 스킵
+                    logger.warning(
+                        f"[batch_fetch_metadata] ID={mid} 404 Not Found. 스킵합니다."
+                    )
+                    continue
+                else:
+                    # 401/403/500 등 다른 HttpError → 로그만 남기고 스킵
+                    logger.error(
+                        f"[batch_fetch_metadata] ID={mid} fetch failed after retries: {e}"
+                    )
+                    continue
+
+            except RuntimeError as e:
+                # _execute_with_backoff 재시도 초과 → 스킵
+                logger.error(
+                    f"[batch_fetch_metadata] ID={mid} retry 초과({max_retries}).{e}"
+                )
+                continue
 
     return mails
 
