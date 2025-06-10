@@ -2,7 +2,7 @@ import logging
 import time
 import random
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from typing import List, Optional
 from urllib.error import HTTPError
 
