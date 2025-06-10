@@ -4,6 +4,8 @@ from starlette.middleware.sessions import SessionMiddleware
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from mailgreen.app.database import engine
+
 load_dotenv(find_dotenv())
 app = FastAPI()
 
@@ -25,9 +27,14 @@ routers = [
     keyword_router,
     trash_router,
     star_router,
-    carbon_router
+    carbon_router,
+    subscription_router,
 ]
 
 for r in routers:
     app.include_router(r)
 
+
+@app.on_event("startup")
+async def on_startup():
+    print(f"연결된 DB URL: {engine.url}")
