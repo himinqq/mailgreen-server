@@ -8,6 +8,7 @@ class MailOut(BaseModel):
     snippet: str | None
     received_at: str
     is_read: bool | None
+    starred: bool
 
     class Config:
         from_attributes = True
