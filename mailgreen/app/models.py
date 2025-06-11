@@ -8,9 +8,9 @@ from sqlalchemy import (
     DateTime,
     UUID,
     Index,
-    Enum,
     Float,
     ForeignKey,
+    func,
 )
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.dialects.postgresql import UUID as PGUUID, ARRAY, TIMESTAMP, JSONB
@@ -127,3 +127,13 @@ class UserProtectedSender(Base):
 
     user_id = Column(PGUUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
     sender_email = Column(String(320), primary_key=True)
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id = Column(PGUUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    sender = Column(String(320), nullable=False)
+    unsubscribe_link = Column(Text, nullable=False)  # 기존 unsubscribe_method
+    is_active = Column(Boolean, default=True)

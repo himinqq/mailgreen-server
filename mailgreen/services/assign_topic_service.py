@@ -11,7 +11,6 @@ def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-10))
 
 
-OTHERS_ID = 6
 PROMOTION_ID = 5
 
 # 유사도 기준
@@ -42,7 +41,7 @@ def batch_assign_category():
             if "CATEGORY_PROMOTIONS" in mail_labels:
                 assigned_cat = PROMOTION_ID
             elif mail_vec_list is None or len(mail_vec_list) == 0:
-                assigned_cat = OTHERS_ID
+                assigned_cat = None
             else:
                 mail_vec = np.array(mail_vec_list, dtype=float)  # (384,)
 
@@ -57,7 +56,7 @@ def batch_assign_category():
                 if max_sim >= SIM_THRESHOLD:
                     assigned_cat = topic_ids[max_idx]  # 1~4
                 else:
-                    assigned_cat = OTHERS_ID  # 5
+                    assigned_cat = None
 
             db.execute(
                 text(
