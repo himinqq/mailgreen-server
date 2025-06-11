@@ -13,8 +13,12 @@ router = APIRouter(prefix="/mail", tags=["mail"])
 
 @router.post("/analyze")
 def analyze_mail(user_id: UUID, db: Session = Depends(get_db)) -> Dict[str, str]:
-    start_history_id = start_analysis_task(db, str(user_id))
-    return {"message": "분석을 시작했습니다.", "start_history_id": start_history_id}
+    info = start_analysis_task(db, str(user_id))
+    return {
+        "message": "분석을 시작했습니다.",
+        "task_id": info["task_id"],
+        "start_history_id": info["start_history_id"],
+    }
 
 
 @router.get("/progress/{task_id}")

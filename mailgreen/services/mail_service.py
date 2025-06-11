@@ -3,7 +3,7 @@ import time
 import random
 
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Any
 from urllib.error import HTTPError
 
 from googleapiclient.errors import HttpError
@@ -54,7 +54,7 @@ def filter_mails(
     return query
 
 
-def start_analysis_task(db: Session, user_id: str) -> str:
+def start_analysis_task(db: Session, user_id: str) -> dict[str, str | None | Any]:
     import uuid
     from datetime import datetime, timezone
     from mailgreen.tasks.mail_analysis import run_analysis
@@ -82,13 +82,10 @@ def start_analysis_task(db: Session, user_id: str) -> str:
     db.commit()
 
     # Celery 비동기 작업 호출
-    run_analysis.delay(
-        user_id=user_id,
-        task_id=task_id,
-        start_history_id=start_history,
-    )
+    async_result = run_analysis.apply_async(args=[user_id, task_id, start_history])
+    celery_task_id = async_result.id
 
-    return start_history or ""
+    return {"task_id": celery_task_id, "start_history_id": start_history or ""}
 
 
 def get_analysis_progress(db: Session, user_id: str) -> dict:

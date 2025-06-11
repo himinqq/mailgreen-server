@@ -4,44 +4,13 @@ from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
 
 from mailgreen.app.models import Subscription, MailEmbedding
-from sqlalchemy import func, and_
+from sqlalchemy import func, and_, desc
 import re
 
-
-def sync_subscriptions(db: Session, user_id: str, fetched: list[dict]):
-    existing = {
-        sub.sender: sub
-        for sub in db.query(Subscription).filter_by(user_id=user_id).all()
-    }
-
-    new_senders = set()
-
-    for item in fetched:
-        sender = item["sender"]
-        new_senders.add(sender)
-
-        if sender in existing:
-            sub = existing[sender]
-            sub.unsubscribe_link = item["unsubscribe_link"]
-        else:
-            sub = Subscription(
-                user_id=user_id,
-                sender=sender,
-                unsubscribe_link=item["unsubscribe_link"],
-                is_active=True,
-            )
-            db.add(sub)
-    try:
-        db.commit()
-        return {
-            "success": True,
-        }
-    except Exception as e:
-        db.rollback()
-        return {
-            "success": False,
-            "error": str(e),
-        }
+from mailgreen.services.subscription_utils import (
+    extract_subscriptions,
+    parse_unsubscribe_value,
+)
 
 
 def unsubscribe_subscription(db: Session, sub_id: str) -> None:
@@ -107,7 +76,37 @@ def unsubscribe_subscription(db: Session, sub_id: str) -> None:
     db.commit()
 
 
-def get_subscriptions(db: Session, user_id: str, limit: int) -> List[dict]:
+def sync_user_subscriptions(db, user_id: str) -> list[dict[str, str | None]]:
+    subs_meta = extract_subscriptions(user_id)
+    existing_senders = {
+        sub.sender for sub in db.query(Subscription).filter_by(user_id=user_id).all()
+    }
+
+    new_subs = []
+    for meta in subs_meta:
+        sender = meta["sender"]
+        link = parse_unsubscribe_value(
+            meta["unsubscribe_http"] or meta["unsubscribe_mailto"]
+        )
+        if not sender or not link:
+            continue
+        if sender in existing_senders:
+            sub = (
+                db.query(Subscription).filter_by(user_id=user_id, sender=sender).first()
+            )
+            sub.unsubscribe_link = link
+        else:
+            sub = Subscription(
+                user_id=user_id, sender=sender, unsubscribe_link=link, is_active=True
+            )
+            db.add(sub)
+            new_subs.append(sub)
+
+    db.commit()
+    return new_subs
+
+
+def get_user_subscriptions(db: Session, user_id: str) -> List[dict]:
     rows = (
         db.query(
             Subscription.sender.label("sender"),
@@ -127,7 +126,6 @@ def get_subscriptions(db: Session, user_id: str, limit: int) -> List[dict]:
         )
         .group_by(Subscription.sender)
         .order_by(func.count(MailEmbedding.id).desc())
-        .limit(limit)
         .all()
     )
 

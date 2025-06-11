@@ -55,6 +55,7 @@ async def sender_details(
             snippet=m.snippet,
             received_at=m.received_at.isoformat(),
             is_read=m.is_read,
+            starred=("STARRED" in (m.labels or [])),
         )
         for m in mails
     ]

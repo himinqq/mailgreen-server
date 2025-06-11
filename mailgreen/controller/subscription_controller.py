@@ -5,11 +5,11 @@ from typing import List
 from uuid import UUID
 
 from mailgreen.app.database import get_db
-from mailgreen.app.schemas.subscription import SubscriptionOut
+from mailgreen.app.schemas.subscription import SubscriptionSyncResult, SubscriptionOut
 from mailgreen.services.subscription_service import (
-    sync_subscriptions,
+    sync_user_subscriptions,
     unsubscribe_subscription,
-    get_subscriptions,
+    get_user_subscriptions,
 )
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
@@ -21,22 +21,27 @@ class SenderCount(BaseModel):
     count: int
 
 
-@router.post("/sync", response_model=List[SubscriptionOut])
-async def sync_subscriptions(user_id: UUID, db: Session = Depends(get_db)):
+@router.get("", response_model=List[SenderCount])
+async def list_subscriptions(
+    user_id: UUID = Query(..., description="User UUID"), db: Session = Depends(get_db)
+):
     try:
-        return sync_subscriptions(db, str(user_id))
+        return get_user_subscriptions(db, str(user_id))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("", response_model=List[SenderCount])
-async def list_subscriptions(
-    user_id: UUID = Query(..., description="User UUID"),
-    limit: int = Query(10, description="최대 발신자 수"),
-    db: Session = Depends(get_db),
-):
+@router.post("/sync", response_model=SubscriptionSyncResult)
+async def sync_subscriptions(user_id: UUID, db: Session = Depends(get_db)):
     try:
-        return get_subscriptions(db, str(user_id), limit)
+        subs_list = sync_user_subscriptions(db, str(user_id))
+        new_models = [SubscriptionOut.model_validate(sub) for sub in subs_list]
+
+        return SubscriptionSyncResult(
+            success=True,
+            new_count=len(new_models),
+            new_subscriptions=new_models,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
