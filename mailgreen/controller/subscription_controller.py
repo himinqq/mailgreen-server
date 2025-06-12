@@ -16,6 +16,7 @@ router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 
 
 class SenderCount(BaseModel):
+    sub_id: UUID
     sender: str
     name: str
     count: int

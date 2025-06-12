@@ -68,6 +68,7 @@ def sync_user_subscriptions(db, user_id: str) -> list[dict[str, str | None]]:
 def get_user_subscriptions(db: Session, user_id: str) -> List[dict]:
     rows = (
         db.query(
+            Subscription.id.label("sub_id"),
             Subscription.sender.label("sender"),
             func.count(MailEmbedding.id).label("count"),
         )
@@ -83,7 +84,7 @@ def get_user_subscriptions(db: Session, user_id: str) -> List[dict]:
             Subscription.is_active == True,
             MailEmbedding.is_deleted == False,
         )
-        .group_by(Subscription.sender)
+        .group_by(Subscription.id, Subscription.sender)
         .order_by(func.count(MailEmbedding.id).desc())
         .all()
     )
@@ -92,5 +93,12 @@ def get_user_subscriptions(db: Session, user_id: str) -> List[dict]:
     for r in rows:
         name, _ = parseaddr(r.sender or "")
         sender_name = name if name else "(Unknown)"
-        result.append({"sender": r.sender, "name": sender_name, "count": r.count})
+        result.append(
+            {
+                "sub_id": r.sub_id,
+                "sender": r.sender,
+                "name": sender_name,
+                "count": r.count,
+            }
+        )
     return result
