@@ -69,7 +69,8 @@ def extract_subscriptions(
 
                 if not unsub_header or unsub_post != "list-unsubscribe=one-click":
                     continue
-
+                if "mailto:" in unsub_header.lower():
+                    continue
                 # 링크 분리 및 우선순위 필터링
                 all_urls = re.findall(r"https?://[^\s,;<>]+", unsub_header)
                 http_urls = [
