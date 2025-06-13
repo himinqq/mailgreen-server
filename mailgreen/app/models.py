@@ -108,7 +108,7 @@ class MajorTopicEmbedding(Base):
         ForeignKey("major_topic.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    vector = Column(ARRAY(Float), nullable=False)
+    vector = Column(Vector(384), nullable=False)
     updated_at = Column(
         TIMESTAMP(timezone=True), nullable=False, server_default="NOW()"
     )
