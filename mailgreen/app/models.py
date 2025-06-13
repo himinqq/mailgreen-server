@@ -10,7 +10,6 @@ from sqlalchemy import (
     Index,
     Float,
     ForeignKey,
-    func,
 )
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.dialects.postgresql import UUID as PGUUID, ARRAY, TIMESTAMP, JSONB
@@ -81,7 +80,7 @@ class MailEmbedding(Base):
     is_read = Column(Boolean)
     is_starred = Column(Boolean)
     received_at = Column(DateTime(timezone=True))
-    vector = Column(Vector(768))
+    vector = Column(Vector(384))
     keywords = Column(ARRAY(Text))
     processed_at = Column(DateTime(timezone=True), default=datetime.datetime.utcnow)
 

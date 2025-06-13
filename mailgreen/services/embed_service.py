@@ -1,7 +1,9 @@
 from sentence_transformers import SentenceTransformer
 from typing import List
 
-_model = SentenceTransformer("snunlp/KR-SBERT-V40K-klueNLI-augSTS")
+_model = SentenceTransformer(
+    "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+)
 
 
 def get_embedding(texts: List[str]) -> List[float]:
