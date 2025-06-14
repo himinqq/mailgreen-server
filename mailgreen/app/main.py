@@ -1,10 +1,18 @@
 import os
+import logging
 from dotenv import load_dotenv, find_dotenv
 from starlette.middleware.sessions import SessionMiddleware
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from mailgreen.app.database import engine
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "WARNING").upper()
+numeric_level = getattr(logging, LOG_LEVEL, logging.INFO)
+
+logging.basicConfig(
+    level=numeric_level,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 load_dotenv(find_dotenv())
 app = FastAPI()
@@ -33,8 +41,3 @@ routers = [
 
 for r in routers:
     app.include_router(r)
-
-
-@app.on_event("startup")
-async def on_startup():
-    print(f"연결된 DB URL: {engine.url}")

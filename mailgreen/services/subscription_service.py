@@ -1,3 +1,4 @@
+import logging
 from email.utils import parseaddr
 from typing import List, Dict
 
@@ -18,23 +19,47 @@ def unsubscribe_subscription(db: Session, sub_id: str) -> None:
     sub = db.query(Subscription).filter_by(id=sub_id).first()
     if not sub:
         raise ValueError("Subscription not found")
+    if not sub.is_active:
+        raise ValueError("Already unsubscribed")
 
-    link = sub.unsubscribe_link
+    link = sub.unsubscribe_link or ""
+    if not link.startswith("https://page.stibee.com/api/v1.0/lists/unsubscribe"):
+        raise ValueError(f"Invalid link: {link!r}")
 
     try:
-        # API 엔드포인트 기반 링크는 POST 요청
-        if "/api/" in link:
-            resp = requests.post(link, timeout=10)
-        else:
-            # 일반 GET 기반 Unsubscribe 링크
-            resp = requests.get(link, timeout=10)
+        resp = requests.post(link, timeout=10)
+        status = resp.status_code
+        data = {}
+        try:
+            data = resp.json()
+        except ValueError:
+            pass
+
+        code = data.get("Code", "")
+        # 정상 취소
+        if 200 <= status < 300:
+            sub.is_active = False
+            db.add(sub)
+            db.commit()
+            return
+
+        # 토큰 만료 or 이미 취소된 경우
+        if status == 400 and code == "Errors.List.NotExistEmail":
+            # db 와 데이터 맞지 않는 경우 false 로 바꾸기
+            if sub.is_active:
+                sub.is_active = False
+                db.commit()
+            raise ValueError("Already unsubscribed")
+
+        # 그 외 400
+        if 400 <= status < 500:
+            raise ValueError(f"{code}: {data.get('Message', resp.text)}")
+
+        # 5xx 등
         resp.raise_for_status()
     except requests.RequestException as e:
+        logging.error(f"Unsubscribe request exception: {e}")
         raise RuntimeError(f"Unsubscribe 요청 실패: {e}")
-
-    sub.is_active = False
-    db.add(sub)
-    db.commit()
 
 
 def sync_user_subscriptions(db, user_id: str) -> list[dict[str, str | None]]:

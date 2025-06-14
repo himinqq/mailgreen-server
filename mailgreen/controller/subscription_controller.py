@@ -52,7 +52,23 @@ async def unsubscribe_sub(sub_id: UUID, db: Session = Depends(get_db)):
     try:
         unsubscribe_subscription(db, str(sub_id))
         return {"detail": "Unsubscribed successfully"}
-    except ValueError:
-        raise HTTPException(status_code=404, detail="Subscription not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+    # 400 계열: 구독 없음(404) / 이미 취소(409) / 그 외(400)
+    except ValueError as e:
+        msg = str(e)
+        if msg == "Subscription not found":
+            raise HTTPException(status_code=404, detail=msg)
+        if msg == "Already unsubscribed":
+            raise HTTPException(
+                status_code=409, detail="이미 구독이 취소된 항목입니다."
+            )
+        # 그 외 Stibee API의 400 에러 메시지
+        raise HTTPException(status_code=400, detail=msg)
+
+    # 외부 요청(5xx, 네트워크 에러) 실패 → 502
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    # 그 밖의 예기치 못한 에러 → 500
+    except Exception:
+        raise HTTPException(status_code=500, detail="Internal server error")
